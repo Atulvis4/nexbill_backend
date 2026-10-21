@@ -1,0 +1,1033 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ==========================================
+// AUTH & RBAC
+// ==========================================
+
+model User {
+  id              Int              @id @default(autoincrement())
+  name            String?
+  email           String           @unique
+  password        String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  userRoles       UserRole[]
+  businessMembers BusinessMember[]
+  documentAuditLogs DocumentAuditLog[]
+
+  @@map("users")
+}
+
+model Role {
+  id              Int              @id @default(autoincrement())
+  name            String           @unique
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id              Int              @id @default(autoincrement())
+  name            String           @unique
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId    Int
+  roleId    Int
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       Int
+  permissionId Int
+  createdAt    DateTime   @default(now())
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permission")
+}
+
+// ==========================================
+// MULTI-TENANCY
+// ==========================================
+
+model Business {
+  id                         Int      @id @default(autoincrement())
+  name                       String
+  gstin                      String?
+  phone                      String?
+  email                      String?
+  billingAddress             String?  @db.Text
+  state                      String?
+  businessType               String?
+  logoUrl                    String?
+  signatureUrl               String?
+  gstEnabled                 Boolean  @default(false)
+  compositionScheme          Boolean  @default(false)
+  defaultTaxRate             Decimal? @db.Decimal(12, 2)
+  rcmEnabled                 Boolean  @default(false)
+  showHsnColumn              Boolean  @default(true)
+  calculateTaxBeforeDiscount Boolean  @default(false)
+  printTemplateStyle         String?
+  printPageSize              String?  @default("A4")
+  printShowLogo              Boolean  @default(true)
+  printBankDetails           String?  @db.Text
+  printTermsFooter           String?  @db.Text
+  numberingSalesPrefix       String?
+  numberingSalesNext         Int      @default(1)
+  numberingPurchasePrefix    String?
+  numberingPurchaseNext      Int      @default(1)
+  numberingEstimatePrefix    String?
+  numberingEstimateNext      Int      @default(1)
+  numberingChallanPrefix     String?
+  numberingChallanNext       Int      @default(1)
+  numberingOrderPrefix       String?
+  numberingOrderNext         Int      @default(1)
+  numberingReturnPrefix      String?
+  numberingReturnNext        Int      @default(1)
+  numberingReceiptPrefix     String?
+  numberingReceiptNext       Int      @default(1)
+  numberingPaymentOutPrefix  String?
+  numberingPaymentOutNext    Int      @default(1)
+  numberingDebitNotePrefix   String?
+  numberingDebitNoteNext     Int      @default(1)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  members             BusinessMember[]
+  parties             Party[]
+  categories          Category[]
+  units               Unit[]
+  items               Item[]
+  stockLedgers        StockLedger[]
+  salesInvoices       SalesInvoice[]
+  estimates           Estimate[]
+  paymentsIn          PaymentIn[]
+  paymentsOut         PaymentOut[]
+  salesReturns        SalesReturn[]
+  purchaseReturns     PurchaseReturn[]
+  deliveryChallans    DeliveryChallan[]
+  salesOrders         SalesOrder[]
+  purchaseInvoices    PurchaseInvoice[]
+  bankAccounts        BankAccount[]
+  bankingTransactions BankingTransaction[]
+  expenses            Expense[]
+  discounts           Discount[]
+  files               File[]
+  manufacturingOrders ManufacturingOrder[]
+  documentAuditLogs   DocumentAuditLog[]
+
+  @@map("businesses")
+}
+
+enum BusinessRole {
+  OWNER
+  ADMIN
+  STAFF
+}
+
+model BusinessMember {
+  id         Int          @id @default(autoincrement())
+  businessId Int
+  userId     Int
+  role       BusinessRole
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  business   Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("business_members")
+}
+
+// ==========================================
+// PARTIES (Customers & Suppliers)
+// ==========================================
+
+enum GstType {
+  UNREGISTERED
+  REGULAR
+  COMPOSITION
+  CONSUMER
+}
+
+enum BalanceType {
+  RECEIVABLE
+  PAYABLE
+}
+
+model Party {
+  id             Int          @id @default(autoincrement())
+  businessId     Int
+  partyName      String
+  phone          String?
+  email          String?
+  billingAddress String?      @db.Text
+  gstType        GstType?
+  gstin          String?
+  openingBalance Decimal      @default(0) @db.Decimal(12, 2)
+  balanceType    BalanceType?
+  state          String?
+  isArchived     Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  business         Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  salesInvoices    SalesInvoice[]
+  estimates        Estimate[]
+  paymentsIn       PaymentIn[]
+  paymentsOut      PaymentOut[]
+  salesReturns     SalesReturn[]
+  purchaseReturns  PurchaseReturn[]
+  deliveryChallans DeliveryChallan[]
+  salesOrders      SalesOrder[]
+  purchaseInvoices PurchaseInvoice[]
+
+  @@map("parties")
+}
+
+// ==========================================
+// INVENTORY: Categories, Units, Items
+// ==========================================
+
+model Category {
+  id               Int      @id @default(autoincrement())
+  businessId       Int
+  name             String
+  prefix           String?
+  parentCategoryId Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  business        Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  parentCategory  Category?  @relation("CategoryToCategory", fields: [parentCategoryId], references: [id], onDelete: SetNull)
+  childCategories Category[] @relation("CategoryToCategory")
+  items           Item[]
+
+  @@map("categories")
+}
+
+model Unit {
+  id              Int      @id @default(autoincrement())
+  businessId      Int
+  name            String
+  code            String?
+  secondaryUnitId Int?
+  multiplier      Decimal? @db.Decimal(12, 4)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  secondaryUnit Unit?    @relation("UnitToUnit", fields: [secondaryUnitId], references: [id], onDelete: SetNull)
+  primaryUnits  Unit[]   @relation("UnitToUnit")
+  items         Item[]
+
+  @@map("units")
+}
+
+enum ItemType {
+  PRODUCT
+  SERVICE
+}
+
+enum ItemSubType {
+  RAW_MATERIAL
+  MANUFACTURED
+  CONSUMABLE
+}
+
+enum PriceType {
+  INCLUSIVE
+  EXCLUSIVE
+}
+
+model Item {
+  id                Int          @id @default(autoincrement())
+  businessId        Int
+  name              String
+  type              ItemType
+  itemSubType       ItemSubType?
+  hsn               String?
+  itemCode          String?
+  categoryId        Int?
+  unitId            Int?
+  description       String?      @db.Text
+  salePrice         Decimal      @default(0) @db.Decimal(12, 2)
+  salePriceType     PriceType    @default(EXCLUSIVE)
+  purchasePrice     Decimal      @default(0) @db.Decimal(12, 2)
+  purchasePriceType PriceType    @default(EXCLUSIVE)
+  taxRate           Decimal      @default(0) @db.Decimal(5, 2)
+  stockQuantity     Decimal      @default(0) @db.Decimal(12, 4)
+ stockValue         Decimal      @default(0) @db.Decimal(12, 2)
+  allocatedStock    Decimal      @default(0) @db.Decimal(12, 4)
+  minStock          Decimal      @default(0) @db.Decimal(12, 4)
+  asOfDate          DateTime?
+  isArchived        Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  business            Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  category            Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  unit                Unit?                @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  stockLedgers        StockLedger[]
+  salesInvoiceRows    SalesInvoiceRow[]
+  estimateRows        EstimateRow[]
+  salesReturnRows     SalesReturnRow[]
+  deliveryChallanRows DeliveryChallanRow[]
+  salesOrderRows      SalesOrderRow[]
+  purchaseInvoiceRows PurchaseInvoiceRow[]
+  purchaseReturnRows  PurchaseReturnRow[]
+  bomComponents       BomComponent[]       @relation("FinishedGoodComponents")
+  rawMaterialUsages   BomComponent[]       @relation("RawMaterialUsage")
+  manufacturingOrders ManufacturingOrder[]
+
+  @@map("items")
+}
+
+// ==========================================
+// STOCK LEDGER
+// ==========================================
+
+enum StockTransactionType {
+  IN
+  OUT
+  ADJUSTMENT
+}
+
+model StockLedger {
+  id            Int                  @id @default(autoincrement())
+  businessId    Int
+  itemId        Int
+  type          StockTransactionType
+  quantity      Decimal              @db.Decimal(12, 4)
+  adjustedValue Decimal?             @db.Decimal(12, 2)
+  description   String?
+  referenceType String?
+  referenceId   Int?
+  createdAt     DateTime             @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  item     Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@map("stock_ledgers")
+}
+
+// ==========================================
+// BILL OF MATERIALS
+// ==========================================
+
+model BomComponent {
+  id             Int     @id @default(autoincrement())
+  finishedGoodId Int
+  rawMaterialId  Int
+  quantity       Decimal @db.Decimal(12, 4)
+
+  finishedGood Item @relation("FinishedGoodComponents", fields: [finishedGoodId], references: [id], onDelete: Cascade)
+  rawMaterial  Item @relation("RawMaterialUsage", fields: [rawMaterialId], references: [id], onDelete: Cascade)
+
+  @@unique([finishedGoodId, rawMaterialId])
+  @@map("bom_components")
+}
+
+// ==========================================
+// MANUFACTURING ORDERS
+// ==========================================
+
+enum ManufacturingOrderStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model ManufacturingOrder {
+  id             Int                      @id @default(autoincrement())
+  businessId     Int
+  orderNo        String
+  finishedGoodId Int
+  quantity       Decimal                  @db.Decimal(12, 4)
+  status         ManufacturingOrderStatus @default(DRAFT)
+  notes          String?                  @db.Text
+  createdAt      DateTime                 @default(now())
+  completedAt    DateTime?
+
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  finishedGood Item     @relation(fields: [finishedGoodId], references: [id])
+
+  @@map("manufacturing_orders")
+}
+
+// ==========================================
+// SALES: Invoices
+// ==========================================
+
+model SalesInvoice {
+  id                   Int       @id @default(autoincrement())
+  businessId           Int
+  partyId              Int?
+  invoiceNo            String    @unique
+  date                 DateTime
+  partyName            String
+  phone                String?
+  stateOfSupply        String?
+  isCash               Boolean   @default(false)
+  subtotal             Decimal   @db.Decimal(12, 2)
+  discountValue        Decimal   @default(0) @db.Decimal(12, 2)
+  discountIsPercentage Boolean   @default(false)
+  cgst                 Decimal   @default(0) @db.Decimal(12, 2)
+  sgst                 Decimal   @default(0) @db.Decimal(12, 2)
+  igst                 Decimal   @default(0) @db.Decimal(12, 2)
+  totalTax             Decimal   @default(0) @db.Decimal(12, 2)
+  grandTotal           Decimal   @db.Decimal(12, 2)
+  paid                 Decimal   @default(0) @db.Decimal(12, 2)
+  balance              Decimal   @db.Decimal(12, 2)
+  roundOff             Decimal   @default(0) @db.Decimal(5, 2)
+  previousBalance      Decimal?  @db.Decimal(12, 2)
+  termsText            String?   @db.Text
+  customTitle          String?
+  description          String?   @db.Text
+  isArchived           Boolean   @default(false)
+  deletedAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  business        Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party?                @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  rows            SalesInvoiceRow[]
+  estimate        Estimate?
+  allocations     PaymentInAllocation[]
+  salesReturns    SalesReturn[]
+  deliveryChallan DeliveryChallan?
+  salesOrder      SalesOrder?
+
+  @@map("sales_invoices")
+}
+
+model SalesInvoiceRow {
+  id                   Int     @id @default(autoincrement())
+  invoiceId            Int
+  itemId               Int?
+  itemName             String
+  hsn                  String?
+  qty                  Decimal @db.Decimal(12, 4)
+  unit                 String?
+  unitMultiplier       Decimal @default(1) @db.Decimal(12, 4)
+  price                Decimal @db.Decimal(12, 2)
+  discountValue        Decimal @default(0) @db.Decimal(12, 2)
+  discountIsPercentage Boolean @default(false)
+  taxRate              Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount            Decimal @default(0) @db.Decimal(12, 2)
+  total                Decimal @db.Decimal(12, 2)
+  box                  Int?
+
+  invoice SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  item    Item?        @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@map("sales_invoice_rows")
+}
+
+// ==========================================
+// SALES: Estimates / Quotations
+// ==========================================
+
+model Estimate {
+  id                 Int      @id @default(autoincrement())
+  businessId         Int
+  partyId            Int?
+  estimateNo         String   @unique
+  date               DateTime
+  partyName          String
+  phone              String?
+  stateOfSupply      String?
+  subtotal           Decimal  @db.Decimal(12, 2)
+  totalTax           Decimal  @default(0) @db.Decimal(12, 2)
+  grandTotal         Decimal  @db.Decimal(12, 2)
+  termsText          String?  @db.Text
+  customTitle        String?
+  isConverted        Boolean  @default(false)
+  convertedInvoiceId Int?     @unique
+  isArchived         Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  business         Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party            Party?        @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  convertedInvoice SalesInvoice? @relation(fields: [convertedInvoiceId], references: [id], onDelete: SetNull)
+  rows             EstimateRow[]
+
+  @@map("estimates")
+}
+
+model EstimateRow {
+  id                   Int     @id @default(autoincrement())
+  estimateId           Int
+  itemId               Int?
+  itemName             String
+  hsn                  String?
+  qty                  Decimal @db.Decimal(12, 4)
+  unit                 String?
+  unitMultiplier       Decimal @default(1) @db.Decimal(12, 4)
+  price                Decimal @db.Decimal(12, 2)
+  discountValue        Decimal @default(0) @db.Decimal(12, 2)
+  discountIsPercentage Boolean @default(false)
+  taxRate              Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount            Decimal @default(0) @db.Decimal(12, 2)
+  total                Decimal @db.Decimal(12, 2)
+  box                  Int?
+
+  estimate Estimate @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+  item     Item?    @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@map("estimate_rows")
+}
+
+// ==========================================
+// SALES & PURCHASES: Payments In & Out
+// ==========================================
+
+enum PaymentMode {
+  CASH
+  BANK
+  UPI
+  CHEQUE
+  CARD
+  OTHER
+}
+
+model PaymentIn {
+  id             Int         @id @default(autoincrement())
+  businessId     Int
+  partyId        Int?
+  bankAccountId  Int?
+  receiptNo      String      @unique
+  date           DateTime
+  receivedAmount Decimal     @db.Decimal(12, 2)
+  paymentMode    PaymentMode
+  referenceNo    String?
+  description    String?     @db.Text
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  business    Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party       Party?                @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  bankAccount BankAccount?          @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  allocations PaymentInAllocation[]
+  purchaseReturnId Int?
+  purchaseReturn   PurchaseReturn?     @relation(fields: [purchaseReturnId], references: [id], onDelete: SetNull)
+
+  @@map("payments_in")
+}
+
+model PaymentInAllocation {
+  id          Int      @id @default(autoincrement())
+  paymentInId Int
+  invoiceId   Int
+  amount      Decimal  @db.Decimal(12, 2)
+  createdAt   DateTime @default(now())
+
+  paymentIn PaymentIn    @relation(fields: [paymentInId], references: [id], onDelete: Cascade)
+  invoice   SalesInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("payment_in_allocations")
+}
+
+model PaymentOut {
+  id            Int         @id @default(autoincrement())
+  businessId    Int
+  partyId       Int?
+  bankAccountId Int?
+  paymentNo     String      @unique
+  date          DateTime
+  amount        Decimal     @db.Decimal(12, 2)
+  paymentMode   PaymentMode
+  referenceNo   String?
+  description   String?     @db.Text
+  salesReturnId Int?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  business    Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party       Party?                 @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  bankAccount BankAccount?           @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  salesReturn SalesReturn?           @relation(fields: [salesReturnId], references: [id], onDelete: SetNull)
+  allocations PaymentOutAllocation[]
+
+  @@map("payments_out")
+}
+
+model PaymentOutAllocation {
+  id                Int      @id @default(autoincrement())
+  paymentOutId      Int
+  purchaseInvoiceId Int
+  amount            Decimal  @db.Decimal(12, 2)
+  createdAt         DateTime @default(now())
+
+  paymentOut      PaymentOut      @relation(fields: [paymentOutId], references: [id], onDelete: Cascade)
+  purchaseInvoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+
+  @@map("payment_out_allocations")
+}
+
+// ==========================================
+// SALES: Returns / Credit Notes
+// ==========================================
+
+enum SalesReturnType {
+  CREDIT_NOTE
+  REPLACEMENT
+}
+
+enum SalesReturnRefundStatus {
+  PENDING
+  PAID
+}
+
+model SalesReturn {
+  id                Int             @id @default(autoincrement())
+  businessId        Int
+  partyId           Int?
+  returnNo          String          @unique
+  date              DateTime
+  originalInvoiceId Int?
+  returnType        SalesReturnType
+  refundStatus      SalesReturnRefundStatus @default(PENDING)
+  grandTotal        Decimal         @db.Decimal(12, 2)
+  notes             String?         @db.Text
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  business        Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party?           @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  originalInvoice SalesInvoice?    @relation(fields: [originalInvoiceId], references: [id], onDelete: SetNull)
+  rows            SalesReturnRow[]
+  paymentsOut     PaymentOut[]
+
+  @@map("sales_returns")
+}
+
+model SalesReturnRow {
+  id                   Int     @id @default(autoincrement())
+  salesReturnId        Int
+  itemId               Int?
+  itemName             String
+  hsn                  String?
+  qty                  Decimal @db.Decimal(12, 4)
+  unit                 String?
+  unitMultiplier       Decimal @default(1) @db.Decimal(12, 4)
+  price                Decimal @db.Decimal(12, 2)
+  discountValue        Decimal @default(0) @db.Decimal(12, 2)
+  discountIsPercentage Boolean @default(false)
+  taxRate              Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount            Decimal @default(0) @db.Decimal(12, 2)
+  total                Decimal @db.Decimal(12, 2)
+  box                  Int?
+
+  salesReturn SalesReturn @relation(fields: [salesReturnId], references: [id], onDelete: Cascade)
+  item        Item?       @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@map("sales_return_rows")
+}
+
+// ==========================================
+// SALES: Delivery Challans
+// ==========================================
+
+enum ChallanStatus {
+  PENDING
+  CONVERTED
+  CANCELLED
+}
+
+model DeliveryChallan {
+  id                 Int           @id @default(autoincrement())
+  businessId         Int
+  partyId            Int?
+  challanNo          String        @unique
+  date               DateTime
+  stateOfSupply      String?
+  transportDetails   String?       @db.Text
+  ewayBillNo         String?
+  deliveryAddress    String?       @db.Text
+  grandTotal         Decimal       @db.Decimal(12, 2)
+  notes              String?       @db.Text
+  termsText          String?       @db.Text
+  customTitle        String?
+  status             ChallanStatus @default(PENDING)
+  convertedInvoiceId Int?          @unique
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  business         Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party            Party?               @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  convertedInvoice SalesInvoice?        @relation(fields: [convertedInvoiceId], references: [id], onDelete: SetNull)
+  rows             DeliveryChallanRow[]
+
+  @@map("delivery_challans")
+}
+
+model DeliveryChallanRow {
+  id                   Int     @id @default(autoincrement())
+  deliveryChallanId    Int
+  itemId               Int?
+  itemName             String
+  hsn                  String?
+  qty                  Decimal @db.Decimal(12, 4)
+  unit                 String?
+  unitMultiplier       Decimal @default(1) @db.Decimal(12, 4)
+  price                Decimal @db.Decimal(12, 2)
+  discountValue        Decimal @default(0) @db.Decimal(12, 2)
+  discountIsPercentage Boolean @default(false)
+  taxRate              Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount            Decimal @default(0) @db.Decimal(12, 2)
+  total                Decimal @db.Decimal(12, 2)
+  box                  Int?
+
+  deliveryChallan DeliveryChallan @relation(fields: [deliveryChallanId], references: [id], onDelete: Cascade)
+  item            Item?           @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@map("delivery_challan_rows")
+}
+
+// ==========================================
+// SALES: Sales Orders
+// ==========================================
+
+enum SalesOrderStatus {
+  PENDING
+  PARTIALLY_DELIVERED
+  DELIVERED
+  CANCELLED
+}
+
+model SalesOrder {
+  id                   Int              @id @default(autoincrement())
+  businessId           Int
+  partyId              Int?
+  orderNo              String           @unique
+  date                 DateTime
+  expectedDeliveryDate DateTime?
+  stateOfSupply        String?
+  deliveryTerms        String?          @db.Text
+  advanceAmount        Decimal          @default(0) @db.Decimal(12, 2)
+  advancePaymentMode   PaymentMode?
+  grandTotal           Decimal          @db.Decimal(12, 2)
+  customTitle          String?
+  status               SalesOrderStatus @default(PENDING)
+  convertedInvoiceId   Int?             @unique
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  business         Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party            Party?          @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  convertedInvoice SalesInvoice?   @relation(fields: [convertedInvoiceId], references: [id], onDelete: SetNull)
+  rows             SalesOrderRow[]
+
+  @@map("sales_orders")
+}
+
+model SalesOrderRow {
+  id                   Int     @id @default(autoincrement())
+  salesOrderId         Int
+  itemId               Int?
+  itemName             String
+  hsn                  String?
+  qty                  Decimal @db.Decimal(12, 4)
+  unit                 String?
+  unitMultiplier       Decimal @default(1) @db.Decimal(12, 4)
+  price                Decimal @db.Decimal(12, 2)
+  discountValue        Decimal @default(0) @db.Decimal(12, 2)
+  discountIsPercentage Boolean @default(false)
+  taxRate              Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount            Decimal @default(0) @db.Decimal(12, 2)
+  total                Decimal @db.Decimal(12, 2)
+  box                  Int?
+
+  salesOrder SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  item       Item?      @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@map("sales_order_rows")
+}
+
+// ==========================================
+// PURCHASES
+// ==========================================
+
+enum PurchasePaymentType {
+  CASH
+  CREDIT
+  BANK
+}
+
+model PurchaseInvoice {
+  id                   Int                 @id @default(autoincrement())
+  businessId           Int
+  partyId              Int?
+  billNo               String              @unique
+  date                 DateTime
+  partyName            String
+  phone                String?
+  stateOfSupply        String?
+  paymentType          PurchasePaymentType @default(CREDIT)
+  subtotal             Decimal             @db.Decimal(12, 2)
+  discountValue        Decimal             @default(0) @db.Decimal(12, 2)
+  discountIsPercentage Boolean             @default(false)
+  cgst                 Decimal             @default(0) @db.Decimal(12, 2)
+  sgst                 Decimal             @default(0) @db.Decimal(12, 2)
+  igst                 Decimal             @default(0) @db.Decimal(12, 2)
+  totalTax             Decimal             @default(0) @db.Decimal(12, 2)
+  grandTotal           Decimal             @db.Decimal(12, 2)
+  paid                 Decimal             @default(0) @db.Decimal(12, 2)
+  balance              Decimal             @db.Decimal(12, 2)
+  termsText            String?             @db.Text
+  customTitle          String?
+  description          String?             @db.Text
+  isArchived           Boolean             @default(false)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  business    Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party       Party?                 @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  rows        PurchaseInvoiceRow[]
+  allocations PaymentOutAllocation[]
+  purchaseReturns PurchaseReturn[]
+
+  @@map("purchase_invoices")
+}
+
+model PurchaseInvoiceRow {
+  id                   Int     @id @default(autoincrement())
+  purchaseInvoiceId    Int
+  itemId               Int?
+  itemName             String
+  hsn                  String?
+  qty                  Decimal @db.Decimal(12, 4)
+  unit                 String?
+  unitMultiplier       Decimal @default(1) @db.Decimal(12, 4)
+  price                Decimal @db.Decimal(12, 2)
+  discountValue        Decimal @default(0) @db.Decimal(12, 2)
+  discountIsPercentage Boolean @default(false)
+  taxRate              Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount            Decimal @default(0) @db.Decimal(12, 2)
+  total                Decimal @db.Decimal(12, 2)
+  box                  Int?
+
+  purchaseInvoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  item            Item?           @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@map("purchase_invoice_rows")
+}
+
+// ==========================================
+// BANKING
+// ==========================================
+
+enum BankAccountType {
+  SAVINGS
+  CURRENT
+  OVERDRAFT
+  CASH
+}
+
+model BankAccount {
+  id             Int             @id @default(autoincrement())
+  businessId     Int
+  name           String
+  accountType    BankAccountType
+  accountNumber  String?
+  ifscCode       String?
+  bankName       String?
+  openingBalance Decimal         @default(0) @db.Decimal(12, 2)
+  currentBalance Decimal         @default(0) @db.Decimal(12, 2)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  business     Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  paymentsIn   PaymentIn[]
+  paymentsOut  PaymentOut[]
+  transactions BankingTransaction[]
+
+  @@map("bank_accounts")
+}
+
+enum BankTransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+}
+
+model BankingTransaction {
+  id            Int                 @id @default(autoincrement())
+  businessId    Int
+  bankAccountId Int
+  date          DateTime
+  type          BankTransactionType
+  amount        Decimal             @db.Decimal(12, 2)
+  description   String?             @db.Text
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  business    Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  @@map("banking_transactions")
+}
+
+// ==========================================
+// EXPENSES
+// ==========================================
+
+model Expense {
+  id                  Int      @id @default(autoincrement())
+  businessId          Int
+  expenseCategoryName String
+  amount              Decimal  @db.Decimal(12, 2)
+  note                String?  @db.Text
+  date                DateTime
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@map("expenses")
+}
+
+// ==========================================
+// DISCOUNTS
+// ==========================================
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+model Discount {
+  id         Int          @id @default(autoincrement())
+  businessId Int
+  name       String
+  type       DiscountType
+  value      Decimal      @db.Decimal(12, 2)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@map("discounts")
+}
+
+// ==========================================
+// FILES & ATTACHMENTS
+// ==========================================
+
+model File {
+  id            Int      @id @default(autoincrement())
+  businessId    Int
+  originalName  String
+  storedPath    String
+  mimeType      String
+  sizeBytes     Int
+  referenceType String?
+  referenceId   Int?
+  createdAt     DateTime @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@map("files")
+}
+
+model DocumentAuditLog {
+  id            Int      @id @default(autoincrement())
+  businessId    Int
+  documentType  String   
+  documentId    Int
+  documentNo    String
+  action        String   
+  changes       Json     
+  userId        Int?
+  createdAt     DateTime @default(now())
+
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("document_audit_logs")
+}
+
+// ==========================================
+// PURCHASES: Purchase Returns / Debit Notes
+// ==========================================
+
+enum PurchaseReturnType {
+  DEBIT_NOTE
+  REPLACEMENT
+}
+
+enum PurchaseReturnRefundStatus {
+  PENDING
+  PAID
+}
+
+model PurchaseReturn {
+  id                Int             @id @default(autoincrement())
+  businessId        Int
+  partyId           Int?
+  returnNo          String          @unique
+  date              DateTime
+  originalBillId    Int?
+  returnType        PurchaseReturnType
+  refundStatus      PurchaseReturnRefundStatus @default(PENDING)
+  grandTotal        Decimal         @db.Decimal(12, 2)
+  notes             String?         @db.Text
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  business        Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  party           Party?           @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  originalBill    PurchaseInvoice? @relation(fields: [originalBillId], references: [id], onDelete: SetNull)
+  rows            PurchaseReturnRow[]
+  paymentsIn      PaymentIn[]
+
+  @@map("purchase_returns")
+}
+
+model PurchaseReturnRow {
+  id                   Int     @id @default(autoincrement())
+  purchaseReturnId     Int
+  itemId               Int?
+  itemName             String
+  hsn                  String?
+  qty                  Decimal @db.Decimal(12, 4)
+  unit                 String?
+  unitMultiplier       Decimal @default(1) @db.Decimal(12, 4)
+  price                Decimal @db.Decimal(12, 2)
+  discountValue        Decimal @default(0) @db.Decimal(12, 2)
+  discountIsPercentage Boolean @default(false)
+  taxRate              Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount            Decimal @default(0) @db.Decimal(12, 2)
+  total                Decimal @db.Decimal(12, 2)
+  box                  Int?
+
+  purchaseReturn PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Cascade)
+  item           Item?          @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@map("purchase_return_rows")
+}
