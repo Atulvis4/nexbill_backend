@@ -13,9 +13,11 @@ import backupRoutes from './backup.routes.js';
 import discountRoutes from './discount.routes.js';
 import manufacturingRoutes from './manufacturing.routes.js';
 import auditRoutes from './audit.routes.js';
+import adminRoutes from './admin.routes.js';
 
 const routes = Router();
 
+routes.use('/admin', adminRoutes);
 routes.use('/auth', authRoutes);
 routes.use('/users', userRoutes);
 routes.use('/parties', partyRoutes);

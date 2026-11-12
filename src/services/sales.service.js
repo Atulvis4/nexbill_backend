@@ -236,7 +236,7 @@ const batchResolveItemsAndUnits = async (tx, businessId, rows) => {
       hsn: r.hsn ?? item?.hsn ?? '',
       unit: r.unit ?? itemUnit?.name ?? '',
       unitMultiplier,
-      taxRate: r.taxRate ?? Number(item?.taxRate) ?? 0,
+      taxRate: r.taxRate ?? (item?.taxRate != null ? Number(item.taxRate) : 0),
       // Keep a reference to the full item object for stock logic
       _item: item,
     };

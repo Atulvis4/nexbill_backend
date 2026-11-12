@@ -6,7 +6,7 @@ const getDashboardSummary = async (businessId) => {
   const todayEnd = new Date();
   todayEnd.setHours(23, 59, 59, 999);
 
-  // Fetch all active parties with only basic balance metadata
+  // Fetch all active parties
   const parties = await prisma.party.findMany({
     where: { businessId, isArchived: false },
     select: { id: true, openingBalance: true, balanceType: true },
@@ -14,44 +14,78 @@ const getDashboardSummary = async (businessId) => {
 
   const partyIds = parties.map((p) => p.id);
 
-  // Fetch aggregated values grouped by partyId using database SUM aggregations
-  const salesAgg = await prisma.salesInvoice.groupBy({
-    by: ['partyId'],
-    where: { partyId: { in: partyIds }, isArchived: false },
-    _sum: { grandTotal: true },
-  });
+  const [
+    salesAgg,
+    purchaseAgg,
+    paymentsInAgg,
+    paymentsOutAgg,
+    salesReturnsAgg,
+    purchaseReturnsAgg,
+    salesInvAgg,
+    purchaseInvAgg,
+    bankAccounts,
+    salesInvoicesToday,
+    expenses,
+  ] = await Promise.all([
+    prisma.salesInvoice.groupBy({
+      by: ['partyId'],
+      where: { partyId: { in: partyIds }, isArchived: false },
+      _sum: { grandTotal: true },
+    }),
+    prisma.purchaseInvoice.groupBy({
+      by: ['partyId'],
+      where: { partyId: { in: partyIds }, isArchived: false },
+      _sum: { grandTotal: true },
+    }),
+    prisma.paymentIn.groupBy({
+      by: ['partyId'],
+      where: { partyId: { in: partyIds } },
+      _sum: { receivedAmount: true },
+    }),
+    prisma.paymentOut.groupBy({
+      by: ['partyId'],
+      where: { partyId: { in: partyIds } },
+      _sum: { amount: true },
+    }),
+    prisma.salesReturn.groupBy({
+      by: ['partyId'],
+      where: { partyId: { in: partyIds } },
+      _sum: { grandTotal: true },
+    }),
+    prisma.purchaseReturn.groupBy({
+      by: ['partyId'],
+      where: { partyId: { in: partyIds } },
+      _sum: { grandTotal: true },
+    }),
+    prisma.salesInvoice.aggregate({
+      where: { businessId, isArchived: false },
+      _sum: { balance: true },
+    }),
+    prisma.purchaseInvoice.aggregate({
+      where: { businessId, isArchived: false },
+      _sum: { balance: true },
+    }),
+    prisma.bankAccount.findMany({
+      where: { businessId },
+      select: { currentBalance: true },
+    }),
+    prisma.salesInvoice.findMany({
+      where: {
+        businessId,
+        isArchived: false,
+        date: { gte: todayStart, lte: todayEnd },
+      },
+      select: { grandTotal: true },
+    }),
+    prisma.expense.findMany({
+      where: {
+        businessId,
+        date: { gte: todayStart, lte: todayEnd },
+      },
+      select: { amount: true },
+    }),
+  ]);
 
-  const purchaseAgg = await prisma.purchaseInvoice.groupBy({
-    by: ['partyId'],
-    where: { partyId: { in: partyIds }, isArchived: false },
-    _sum: { grandTotal: true },
-  });
-
-  const paymentsInAgg = await prisma.paymentIn.groupBy({
-    by: ['partyId'],
-    where: { partyId: { in: partyIds } },
-    _sum: { receivedAmount: true },
-  });
-
-  const paymentsOutAgg = await prisma.paymentOut.groupBy({
-    by: ['partyId'],
-    where: { partyId: { in: partyIds } },
-    _sum: { amount: true },
-  });
-
-  const salesReturnsAgg = await prisma.salesReturn.groupBy({
-    by: ['partyId'],
-    where: { partyId: { in: partyIds } },
-    _sum: { grandTotal: true },
-  });
-
-  const purchaseReturnsAgg = await prisma.purchaseReturn.groupBy({
-    by: ['partyId'],
-    where: { partyId: { in: partyIds } },
-    _sum: { grandTotal: true },
-  });
-
-  // Create fast lookup maps
   const salesMap = new Map(salesAgg.map((a) => [a.partyId, Number(a._sum.grandTotal || 0)]));
   const purchaseMap = new Map(purchaseAgg.map((a) => [a.partyId, Number(a._sum.grandTotal || 0)]));
   const paymentsInMap = new Map(paymentsInAgg.map((a) => [a.partyId, Number(a._sum.receivedAmount || 0)]));
@@ -59,67 +93,38 @@ const getDashboardSummary = async (businessId) => {
   const salesReturnsMap = new Map(salesReturnsAgg.map((a) => [a.partyId, Number(a._sum.grandTotal || 0)]));
   const purchaseReturnsMap = new Map(purchaseReturnsAgg.map((a) => [a.partyId, Number(a._sum.grandTotal || 0)]));
 
-  let receivable = 0;
-  let payable = 0;
+  let toCollect = 0;
+  let toPay = 0;
 
   for (const party of parties) {
-    const totalSales = salesMap.get(party.id) || 0;
-    const totalPurchases = purchaseMap.get(party.id) || 0;
-    const totalPaymentsIn = paymentsInMap.get(party.id) || 0;
-    const totalPaymentsOut = paymentsOutMap.get(party.id) || 0;
-    const totalSalesReturns = salesReturnsMap.get(party.id) || 0;
-    const totalPurchaseReturns = purchaseReturnsMap.get(party.id) || 0;
+    const s = salesMap.get(party.id) || 0;
+    const pi = paymentsInMap.get(party.id) || 0;
+    const sr = salesReturnsMap.get(party.id) || 0;
+    const p = purchaseMap.get(party.id) || 0;
+    const po = paymentsOutMap.get(party.id) || 0;
+    const pr = purchaseReturnsMap.get(party.id) || 0;
 
-    let netReceivable = 0;
-    let netPayable = 0;
+    const netRec = (party.balanceType === 'RECEIVABLE' ? Number(party.openingBalance) : 0) + (s - pi - sr);
+    const netPay = (party.balanceType === 'PAYABLE' ? Number(party.openingBalance) : 0) + (p - po - pr);
 
-    if (party.balanceType === 'RECEIVABLE') {
-      netReceivable += Number(party.openingBalance);
-    } else if (party.balanceType === 'PAYABLE') {
-      netPayable += Number(party.openingBalance);
-    }
-
-    netReceivable += (totalSales - totalPaymentsIn - totalSalesReturns);
-    netPayable += (totalPurchases - totalPaymentsOut - totalPurchaseReturns);
-
-    if (netReceivable >= netPayable) {
-      receivable += (netReceivable - netPayable);
-    } else {
-      payable += (netPayable - netReceivable);
+    if (netRec > netPay) {
+      toCollect += netRec - netPay;
+    } else if (netPay > netRec) {
+      toPay += netPay - netRec;
     }
   }
 
-  // Cash/Bank Balance
-  const bankAccounts = await prisma.bankAccount.findMany({
-    where: { businessId },
-    select: { currentBalance: true },
-  });
+  const receivable = Number(salesInvAgg._sum.balance || 0);
+  const payable = Number(purchaseInvAgg._sum.balance || 0);
   const cashBalance = bankAccounts.reduce((sum, acc) => sum + Number(acc.currentBalance), 0);
-
-  // Today's Sales
-  const salesInvoicesToday = await prisma.salesInvoice.findMany({
-    where: {
-      businessId,
-      isArchived: false,
-      date: { gte: todayStart, lte: todayEnd },
-    },
-    select: { grandTotal: true },
-  });
   const salesToday = salesInvoicesToday.reduce((sum, inv) => sum + Number(inv.grandTotal), 0);
-
-  // Today's Expenses
-  const expenses = await prisma.expense.findMany({
-    where: {
-      businessId,
-      date: { gte: todayStart, lte: todayEnd },
-    },
-    select: { amount: true },
-  });
   const expensesToday = expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
 
   return {
     receivable,
     payable,
+    toCollect: Math.round(toCollect * 100) / 100,
+    toPay: Math.round(toPay * 100) / 100,
     cashBalance,
     salesToday,
     expensesToday,

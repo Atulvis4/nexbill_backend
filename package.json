@@ -11,7 +11,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "test:api": "node verify-apis.js"
+    "test:api": "node verify-apis.js",
+    "clean:db": "prisma migrate reset"
   },
   "keywords": [],
   "author": "",
@@ -28,6 +29,7 @@
     "@prisma/adapter-mariadb": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@prisma/config": "^7.8.0",
+    "adm-zip": "^0.6.1",
     "bcryptjs": "^3.0.3",
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",

@@ -81,6 +81,66 @@ async function main() {
   }
   console.log('✔ Seeded role permission associations.');
 
+  // 4. Superadmin User
+  console.log('Seeding Superadmin User...');
+  const { hashPassword } = await import('../src/utils/password.js');
+  const adminPassword = await hashPassword('Admin@12345');
+
+  const superadmin = await prisma.user.upsert({
+    where: { email: 'superadmin@nexbill.com' },
+    update: {
+      name: 'Super Admin',
+      password: adminPassword,
+    },
+    create: {
+      name: 'Super Admin',
+      email: 'superadmin@nexbill.com',
+      password: adminPassword,
+      userRoles: {
+        create: {
+          roleId: 1, // ADMIN
+        },
+      },
+    },
+  });
+
+  // Ensure ADMIN role association exists
+  await prisma.userRole.upsert({
+    where: {
+      userId_roleId: {
+        userId: superadmin.id,
+        roleId: 1,
+      },
+    },
+    update: {},
+    create: {
+      userId: superadmin.id,
+      roleId: 1,
+    },
+  });
+
+  // Ensure default business exists
+  const existingMember = await prisma.businessMember.findFirst({
+    where: { userId: superadmin.id },
+  });
+
+  if (!existingMember) {
+    const business = await prisma.business.create({
+      data: {
+        name: 'NexBill HQ',
+      },
+    });
+
+    await prisma.businessMember.create({
+      data: {
+        businessId: business.id,
+        userId: superadmin.id,
+        role: 'OWNER',
+      },
+    });
+  }
+  console.log('✔ Seeded Superadmin user (superadmin@nexbill.com).');
+
   console.log('DB Seeding finished successfully!');
 }
 
