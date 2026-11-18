@@ -2,6 +2,8 @@ import prisma from '../config/prisma.js';
 import ApiError from '../utils/ApiError.js';
 import httpStatus from '../config/constants.js';
 import auditService from './audit.service.js';
+import { getPaginationParams, formatPaginatedResponse } from '../utils/pagination.js';
+import cache from '../utils/cache.js';
 
 const generateDocNo = async (tx, businessId, type) => {
   const business = await tx.business.findUnique({ where: { id: businessId } });
@@ -98,7 +100,7 @@ const createPurchase = async (businessId, data) => {
   // ─── Payment safety: clamp paid to [0, grandTotal] server-side ───
   const { rows, bankAccountId, paid: rawPaid, balance: rawBalance, ...purchaseData } = data;
 
-  return await prisma.$transaction(async (tx) => {
+  const purchase = await prisma.$transaction(async (tx) => {
     // Resolve or auto-create party
     const resolvedPartyId = await resolveOrCreateParty(
       tx,
@@ -297,17 +299,72 @@ const createPurchase = async (businessId, data) => {
 
     return purchase;
   });
+
+  cache.invalidatePurchases(businessId);
+  return purchase;
 };
 
-const listPurchases = async (businessId) => {
-  return await prisma.purchaseInvoice.findMany({
-    where: { businessId, isArchived: false },
+const listPurchases = async (businessId, options = {}) => {
+  const query = typeof options === 'string' ? { search: options } : (options || {});
+
+  const cacheKey = `purchase:${businessId}:invoices:${JSON.stringify(query)}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const { search, fromDate, toDate, partyId, sortBy = 'date', sortOrder = 'desc' } = query;
+
+  const where = {
+    businessId,
+    isArchived: false,
+  };
+
+  if (partyId) {
+    where.partyId = parseInt(partyId, 10);
+  }
+
+  if (search) {
+    where.OR = [
+      { billNo: { contains: search } },
+      { partyName: { contains: search } },
+    ];
+  }
+
+  if (fromDate || toDate) {
+    where.date = {};
+    if (fromDate) where.date.gte = new Date(fromDate);
+    if (toDate) where.date.lte = new Date(toDate);
+  }
+
+  const paginationParams = getPaginationParams(query, { limit: 50 });
+  const total = await prisma.purchaseInvoice.count({ where });
+
+  const orderBy = [
+    { [sortBy === 'billNo' ? 'billNo' : sortBy === 'grandTotal' ? 'grandTotal' : 'date']: sortOrder === 'asc' ? 'asc' : 'desc' },
+    { createdAt: 'desc' }
+  ];
+
+  if (paginationParams.isAll) {
+    const data = await prisma.purchaseInvoice.findMany({
+      where,
+      include: { rows: true },
+      orderBy,
+    });
+    const res = formatPaginatedResponse(data, total, paginationParams);
+    cache.set(cacheKey, res, 120);
+    return res;
+  }
+
+  const data = await prisma.purchaseInvoice.findMany({
+    where,
     include: { rows: true },
-    orderBy: [
-      { date: 'desc' },
-      { createdAt: 'desc' }
-    ],
+    orderBy,
+    skip: paginationParams.skip,
+    take: paginationParams.take,
   });
+
+  const res = formatPaginatedResponse(data, total, paginationParams);
+  cache.set(cacheKey, res, 120);
+  return res;
 };
 
 const getPurchase = async (businessId, id) => {
@@ -331,6 +388,7 @@ const deletePurchase = async (businessId, id) => {
     data: { isArchived: true },
   });
 
+  cache.invalidatePurchases(businessId);
   return { success: true };
 };
 
@@ -341,22 +399,51 @@ const deletePaymentOut = async (businessId, id) => {
 
   if (!payment) throw new ApiError(httpStatus.NOT_FOUND, 'Payment out not found');
 
-  return await prisma.$transaction(async (tx) => {
+  const res = await prisma.$transaction(async (tx) => {
     await tx.paymentOutAllocation.deleteMany({ where: { paymentOutId: id } });
     await tx.paymentOut.delete({ where: { id } });
     return { success: true };
   });
+
+  cache.invalidatePurchases(businessId);
+  return res;
 };
 
-const listPaymentsOut = async (businessId) => {
-  return await prisma.paymentOut.findMany({
-    where: { businessId },
+const listPaymentsOut = async (businessId, options = {}) => {
+  const query = typeof options === 'string' ? { search: options } : (options || {});
+  const { search } = query;
+
+  const where = { businessId };
+  if (search) {
+    where.OR = [
+      { paymentNo: { contains: search } },
+      { referenceNo: { contains: search } },
+      { party: { partyName: { contains: search } } },
+    ];
+  }
+
+  const paginationParams = getPaginationParams(query, { limit: 50 });
+  const total = await prisma.paymentOut.count({ where });
+  const orderBy = [{ date: 'desc' }, { createdAt: 'desc' }];
+
+  if (paginationParams.isAll) {
+    const data = await prisma.paymentOut.findMany({
+      where,
+      include: { allocations: { include: { purchaseInvoice: true } }, party: true, salesReturn: true },
+      orderBy,
+    });
+    return formatPaginatedResponse(data, total, paginationParams);
+  }
+
+  const data = await prisma.paymentOut.findMany({
+    where,
     include: { allocations: { include: { purchaseInvoice: true } }, party: true, salesReturn: true },
-    orderBy: [
-      { date: 'desc' },
-      { createdAt: 'desc' }
-    ],
+    orderBy,
+    skip: paginationParams.skip,
+    take: paginationParams.take,
   });
+
+  return formatPaginatedResponse(data, total, paginationParams);
 };
 
 const createPaymentOut = async (businessId, data) => {
@@ -468,7 +555,7 @@ const updatePurchase = async (businessId, id, data, userId) => {
 
   const { rows, paid, bankAccountId, ...updateFields } = data;
 
-  return await prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     // 1. Revert old stock increases
     for (const r of oldDoc.rows) {
       if (r.itemId) {
@@ -722,6 +809,9 @@ const updatePurchase = async (businessId, id, data, userId) => {
 
     return updated;
   });
+
+  cache.invalidatePurchases(businessId);
+  return updated;
 };
 
 const updatePaymentOut = async (businessId, id, data, userId) => {
@@ -733,7 +823,7 @@ const updatePaymentOut = async (businessId, id, data, userId) => {
 
   const { amount, bankAccountId, date, description, paymentMode, referenceNo } = data;
 
-  return await prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     // Revert old bank balance
     if (oldDoc.bankAccountId) {
       await tx.bankAccount.update({
@@ -794,6 +884,9 @@ const updatePaymentOut = async (businessId, id, data, userId) => {
 
     return updated;
   });
+
+  cache.invalidatePurchases(businessId);
+  return updated;
 };
 
 // =========================================================================
@@ -929,7 +1022,13 @@ const createPurchaseReturn = async (businessId, data, userId) => {
   });
 };
 
-const listPurchaseReturns = async (businessId, search, fromDate, toDate, partyId) => {
+const listPurchaseReturns = async (businessId, options = {}, legacyFromDate, legacyToDate, legacyPartyId) => {
+  const query = typeof options === 'string'
+    ? { search: options, fromDate: legacyFromDate, toDate: legacyToDate, partyId: legacyPartyId }
+    : (options || {});
+
+  const { search, fromDate, toDate, partyId } = query;
+
   const where = {
     businessId,
     ...(partyId ? { partyId: Number(partyId) } : {}),
@@ -948,11 +1047,28 @@ const listPurchaseReturns = async (businessId, search, fromDate, toDate, partyId
     ];
   }
 
-  return await prisma.purchaseReturn.findMany({
+  const paginationParams = getPaginationParams(query, { limit: 50 });
+  const total = await prisma.purchaseReturn.count({ where });
+  const orderBy = { date: 'desc' };
+
+  if (paginationParams.isAll) {
+    const data = await prisma.purchaseReturn.findMany({
+      where,
+      include: { party: true, originalBill: true, rows: true },
+      orderBy,
+    });
+    return formatPaginatedResponse(data, total, paginationParams);
+  }
+
+  const data = await prisma.purchaseReturn.findMany({
     where,
     include: { party: true, originalBill: true, rows: true },
-    orderBy: { date: 'desc' },
+    orderBy,
+    skip: paginationParams.skip,
+    take: paginationParams.take,
   });
+
+  return formatPaginatedResponse(data, total, paginationParams);
 };
 
 const getPurchaseReturn = async (businessId, id) => {
@@ -967,7 +1083,7 @@ const getPurchaseReturn = async (businessId, id) => {
 const updatePurchaseReturn = async (businessId, id, data, userId) => {
   const { rows, isCashRefund, ...returnData } = data;
 
-  return await prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     const oldReturn = await tx.purchaseReturn.findFirst({
       where: { id, businessId },
       include: { rows: true },
@@ -1104,10 +1220,13 @@ const updatePurchaseReturn = async (businessId, id, data, userId) => {
 
     return updated;
   });
+
+  cache.invalidatePurchases(businessId);
+  return updated;
 };
 
 const deletePurchaseReturn = async (businessId, id, userId) => {
-  return await prisma.$transaction(async (tx) => {
+  const res = await prisma.$transaction(async (tx) => {
     const oldReturn = await tx.purchaseReturn.findFirst({
       where: { id, businessId },
       include: { rows: true },
@@ -1169,6 +1288,9 @@ const deletePurchaseReturn = async (businessId, id, userId) => {
 
     return { success: true };
   });
+
+  cache.invalidatePurchases(businessId);
+  return res;
 };
 
 // =========================================================================

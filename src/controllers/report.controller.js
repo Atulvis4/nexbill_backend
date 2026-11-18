@@ -9,8 +9,8 @@ const getDashboardSummary = asyncHandler(async (req, res) => {
 });
 
 const getSalesTrend = asyncHandler(async (req, res) => {
-  const { days } = req.query;
-  const trend = await reportService.getSalesTrend(req.businessId, days ? parseInt(days, 10) : 30);
+  const { days, period } = req.query;
+  const trend = await reportService.getSalesTrend(req.businessId, { days, period });
   sendSuccess(res, httpStatus.OK, 'Sales trend fetched successfully', trend);
 });
 
@@ -45,8 +45,14 @@ const getProfitLossReport = asyncHandler(async (req, res) => {
 });
 
 const getBalanceSheetReport = asyncHandler(async (req, res) => {
-  const report = await reportService.getBalanceSheetReport(req.businessId);
+  const { asOfDate } = req.query;
+  const report = await reportService.getBalanceSheetReport(req.businessId, asOfDate);
   sendSuccess(res, httpStatus.OK, 'Balance sheet generated successfully', report);
+});
+
+const getItemReportByParty = asyncHandler(async (req, res) => {
+  const report = await reportService.getItemReportByParty(req.businessId, req.query);
+  sendSuccess(res, httpStatus.OK, 'Item report by party generated successfully', report);
 });
 
 const getGrowthSummary = asyncHandler(async (req, res) => {
@@ -86,6 +92,7 @@ const reportController = {
   getStockSummaryReport,
   getProfitLossReport,
   getBalanceSheetReport,
+  getItemReportByParty,
   getGrowthSummary,
   getOverdueParties,
   getTopSellingItems,

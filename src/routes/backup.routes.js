@@ -5,6 +5,7 @@ import fs from 'fs';
 import backupController from '../controllers/backup.controller.js';
 import authenticate from '../middlewares/authenticate.js';
 import extractBusiness from '../middlewares/extractBusiness.js';
+import { backupUploadLimiter } from '../middlewares/rateLimiter.js';
 
 const uploadDir = 'uploads/backups';
 if (!fs.existsSync(uploadDir)) {
@@ -33,8 +34,8 @@ backupRoutes.use(authenticate);
 backupRoutes.use(extractBusiness);
 
 backupRoutes.post('/export', backupController.exportBackup);
-backupRoutes.post('/restore', upload.single('backupFile'), backupController.restoreBackup);
-backupRoutes.post('/upload-vyapar', upload.single('backupFile'), backupController.uploadVyaparBackup);
+backupRoutes.post('/restore', backupUploadLimiter, upload.single('backupFile'), backupController.restoreBackup);
+backupRoutes.post('/upload-vyapar', backupUploadLimiter, upload.single('backupFile'), backupController.uploadVyaparBackup);
 
 export { backupRoutes };
 export default backupRoutes;

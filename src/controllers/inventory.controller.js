@@ -60,8 +60,7 @@ const deleteUnit = asyncHandler(async (req, res) => {
 // =========================================================================
 
 const listItems = asyncHandler(async (req, res) => {
-  const { search, type } = req.query;
-  const items = await inventoryService.listItems(req.businessId, search, type);
+  const items = await inventoryService.listItems(req.businessId, req.query);
   sendSuccess(res, httpStatus.OK, 'Items fetched successfully', items);
 });
 

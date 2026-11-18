@@ -2,11 +2,13 @@ import { Router } from 'express';
 import reportController from '../controllers/report.controller.js';
 import authenticate from '../middlewares/authenticate.js';
 import extractBusiness from '../middlewares/extractBusiness.js';
+import { reportsLimiter } from '../middlewares/rateLimiter.js';
 
 const reportRoutes = Router();
 
 reportRoutes.use(authenticate);
 reportRoutes.use(extractBusiness);
+reportRoutes.use(reportsLimiter);
 
 // Dashboard routes
 reportRoutes.get('/dashboard/summary', reportController.getDashboardSummary);
@@ -19,6 +21,7 @@ reportRoutes.get('/reports/daybook', reportController.getDaybookReport);
 reportRoutes.get('/reports/stock-summary', reportController.getStockSummaryReport);
 reportRoutes.get('/reports/profit-loss', reportController.getProfitLossReport);
 reportRoutes.get('/reports/balance-sheet', reportController.getBalanceSheetReport);
+reportRoutes.get('/reports/items-by-party', reportController.getItemReportByParty);
 
 // Growth routes
 reportRoutes.get('/growth/summary', reportController.getGrowthSummary);

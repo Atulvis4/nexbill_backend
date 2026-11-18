@@ -10,7 +10,7 @@ const createPurchase = asyncHandler(async (req, res) => {
 });
 
 const listPurchases = asyncHandler(async (req, res) => {
-  const purchases = await purchaseService.listPurchases(req.businessId);
+  const purchases = await purchaseService.listPurchases(req.businessId, req.query);
   sendSuccess(res, httpStatus.OK, 'Purchase invoices fetched successfully', purchases);
 });
 
@@ -27,7 +27,7 @@ const deletePurchase = asyncHandler(async (req, res) => {
 });
 
 const listPaymentsOut = asyncHandler(async (req, res) => {
-  const payments = await purchaseService.listPaymentsOut(req.businessId);
+  const payments = await purchaseService.listPaymentsOut(req.businessId, req.query);
   sendSuccess(res, httpStatus.OK, 'Payment Out receipts fetched successfully', payments);
 });
 
@@ -55,8 +55,7 @@ const createPurchaseReturn = asyncHandler(async (req, res) => {
 });
 
 const listPurchaseReturns = asyncHandler(async (req, res) => {
-  const { search, fromDate, toDate, partyId } = req.query;
-  const returns = await purchaseService.listPurchaseReturns(req.businessId, search, fromDate, toDate, partyId);
+  const returns = await purchaseService.listPurchaseReturns(req.businessId, req.query);
   sendSuccess(res, httpStatus.OK, 'Purchase returns debit notes fetched successfully', returns);
 });
 

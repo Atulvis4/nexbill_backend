@@ -2,6 +2,8 @@ import prisma from '../config/prisma.js';
 import ApiError from '../utils/ApiError.js';
 import httpStatus from '../config/constants.js';
 import auditService from './audit.service.js';
+import { getPaginationParams, formatPaginatedResponse } from '../utils/pagination.js';
+import cache from '../utils/cache.js';
 
 // Helper to generate document numbers dynamically and increment next count
 const generateDocNo = async (tx, businessId, type) => {
@@ -252,7 +254,7 @@ const batchResolveItemsAndUnits = async (tx, businessId, rows) => {
 const createInvoice = async (businessId, data) => {
   const { rows, paid: rawPaid, bankAccountId, previousBalancePaid, ...invoiceData } = data;
 
-  return await prisma.$transaction(async (tx) => {
+  const invoice = await prisma.$transaction(async (tx) => {
     // Resolve or auto-create party if partyName is provided
     invoiceData.partyId = await resolveOrCreateParty(
       tx,
@@ -491,10 +493,23 @@ const createInvoice = async (businessId, data) => {
 
     return invoice;
   });
+
+  cache.invalidateSales(businessId);
+  return invoice;
 };
 
 
-const listInvoices = async (businessId, search, fromDate, toDate, partyId) => {
+const listInvoices = async (businessId, options = {}, legacyFromDate, legacyToDate, legacyPartyId) => {
+  const query = typeof options === 'string'
+    ? { search: options, fromDate: legacyFromDate, toDate: legacyToDate, partyId: legacyPartyId }
+    : (options || {});
+
+  const cacheKey = `sales:${businessId}:invoices:${JSON.stringify(query)}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const { search, fromDate, toDate, partyId, sortBy = 'date', sortOrder = 'desc' } = query;
+
   const where = {
     businessId,
     isArchived: false,
@@ -517,14 +532,36 @@ const listInvoices = async (businessId, search, fromDate, toDate, partyId) => {
     if (toDate) where.date.lte = new Date(toDate);
   }
 
-  return await prisma.salesInvoice.findMany({
+  const paginationParams = getPaginationParams(query, { limit: 50 });
+  const total = await prisma.salesInvoice.count({ where });
+
+  const orderBy = [
+    { [sortBy === 'invoiceNo' ? 'invoiceNo' : sortBy === 'grandTotal' ? 'grandTotal' : 'date']: sortOrder === 'asc' ? 'asc' : 'desc' },
+    { createdAt: 'desc' }
+  ];
+
+  if (paginationParams.isAll) {
+    const data = await prisma.salesInvoice.findMany({
+      where,
+      include: { rows: true },
+      orderBy,
+    });
+    const response = formatPaginatedResponse(data, total, paginationParams);
+    cache.set(cacheKey, response, 120);
+    return response;
+  }
+
+  const data = await prisma.salesInvoice.findMany({
     where,
     include: { rows: true },
-    orderBy: [
-      { date: 'desc' },
-      { createdAt: 'desc' }
-    ],
+    orderBy,
+    skip: paginationParams.skip,
+    take: paginationParams.take,
   });
+
+  const response = formatPaginatedResponse(data, total, paginationParams);
+  cache.set(cacheKey, response, 120);
+  return response;
 };
 
 const getInvoice = async (businessId, id) => {
@@ -557,6 +594,7 @@ const deleteInvoice = async (businessId, id) => {
     },
   });
 
+  cache.invalidateSales(businessId);
   return { success: true };
 };
 
@@ -567,11 +605,14 @@ const deletePaymentIn = async (businessId, id) => {
 
   if (!payment) throw new ApiError(httpStatus.NOT_FOUND, 'Payment receipt not found');
 
-  return await prisma.$transaction(async (tx) => {
+  const res = await prisma.$transaction(async (tx) => {
     await tx.paymentInAllocation.deleteMany({ where: { paymentInId: id } });
     await tx.paymentIn.delete({ where: { id } });
     return { success: true };
   });
+
+  cache.invalidateSales(businessId);
+  return res;
 };
 
 const deleteReturn = async (businessId, id) => {
@@ -652,15 +693,38 @@ const createEstimate = async (businessId, data) => {
   });
 };
 
-const listEstimates = async (businessId) => {
-  return await prisma.estimate.findMany({
-    where: { businessId, isArchived: false },
+const listEstimates = async (businessId, options = {}) => {
+  const query = typeof options === 'string' ? { search: options } : (options || {});
+  const { search } = query;
+  const where = { businessId, isArchived: false };
+  if (search) {
+    where.OR = [
+      { estimateNo: { contains: search } },
+      { partyName: { contains: search } },
+    ];
+  }
+  const paginationParams = getPaginationParams(query, { limit: 50 });
+  const total = await prisma.estimate.count({ where });
+  const orderBy = [{ date: 'desc' }, { createdAt: 'desc' }];
+
+  if (paginationParams.isAll) {
+    const data = await prisma.estimate.findMany({
+      where,
+      include: { rows: true, party: true },
+      orderBy,
+    });
+    return formatPaginatedResponse(data, total, paginationParams);
+  }
+
+  const data = await prisma.estimate.findMany({
+    where,
     include: { rows: true, party: true },
-    orderBy: [
-      { date: 'desc' },
-      { createdAt: 'desc' }
-    ],
+    orderBy,
+    skip: paginationParams.skip,
+    take: paginationParams.take,
   });
+
+  return formatPaginatedResponse(data, total, paginationParams);
 };
 
 const deleteEstimate = async (businessId, id) => {
@@ -714,7 +778,7 @@ const convertEstimateToInvoice = async (businessId, estimateId) => {
 // =========================================================================
 
 const createPaymentIn = async (businessId, data) => {
-  return await prisma.$transaction(async (tx) => {
+  const payment = await prisma.$transaction(async (tx) => {
     if (data.receiptNo) {
       const existing = await tx.paymentIn.findUnique({
         where: { receiptNo: data.receiptNo },
@@ -837,17 +901,46 @@ const createPaymentIn = async (businessId, data) => {
 
     return payment;
   });
+
+  cache.invalidateSales(businessId);
+  return payment;
 };
 
-const listPaymentsIn = async (businessId) => {
-  return await prisma.paymentIn.findMany({
-    where: { businessId },
+const listPaymentsIn = async (businessId, options = {}) => {
+  const query = typeof options === 'string' ? { search: options } : (options || {});
+  const { search } = query;
+
+  const where = { businessId };
+  if (search) {
+    where.OR = [
+      { paymentNo: { contains: search } },
+      { referenceNo: { contains: search } },
+      { party: { partyName: { contains: search } } },
+    ];
+  }
+
+  const paginationParams = getPaginationParams(query, { limit: 50 });
+  const total = await prisma.paymentIn.count({ where });
+  const orderBy = [{ date: 'desc' }, { createdAt: 'desc' }];
+
+  if (paginationParams.isAll) {
+    const data = await prisma.paymentIn.findMany({
+      where,
+      include: { allocations: { include: { invoice: true } }, party: true },
+      orderBy,
+    });
+    return formatPaginatedResponse(data, total, paginationParams);
+  }
+
+  const data = await prisma.paymentIn.findMany({
+    where,
     include: { allocations: { include: { invoice: true } }, party: true },
-    orderBy: [
-      { date: 'desc' },
-      { createdAt: 'desc' }
-    ],
+    orderBy,
+    skip: paginationParams.skip,
+    take: paginationParams.take,
   });
+
+  return formatPaginatedResponse(data, total, paginationParams);
 };
 
 // =========================================================================
@@ -978,15 +1071,38 @@ const createReturn = async (businessId, data) => {
   });
 };
 
-const listReturns = async (businessId) => {
-  return await prisma.salesReturn.findMany({
-    where: { businessId },
+const listReturns = async (businessId, options = {}) => {
+  const query = typeof options === 'string' ? { search: options } : (options || {});
+  const { search } = query;
+  const where = { businessId };
+  if (search) {
+    where.OR = [
+      { returnNo: { contains: search } },
+      { partyName: { contains: search } },
+    ];
+  }
+  const paginationParams = getPaginationParams(query, { limit: 50 });
+  const total = await prisma.salesReturn.count({ where });
+  const orderBy = [{ date: 'desc' }, { createdAt: 'desc' }];
+
+  if (paginationParams.isAll) {
+    const data = await prisma.salesReturn.findMany({
+      where,
+      include: { rows: true, party: true, paymentsOut: { select: { id: true, paymentNo: true, amount: true } } },
+      orderBy,
+    });
+    return formatPaginatedResponse(data, total, paginationParams);
+  }
+
+  const data = await prisma.salesReturn.findMany({
+    where,
     include: { rows: true, party: true, paymentsOut: { select: { id: true, paymentNo: true, amount: true } } },
-    orderBy: [
-      { date: 'desc' },
-      { createdAt: 'desc' }
-    ],
+    orderBy,
+    skip: paginationParams.skip,
+    take: paginationParams.take,
   });
+
+  return formatPaginatedResponse(data, total, paginationParams);
 };
 
 // =========================================================================
@@ -1084,15 +1200,38 @@ const createChallan = async (businessId, data) => {
   });
 };
 
-const listChallans = async (businessId) => {
-  return await prisma.deliveryChallan.findMany({
-    where: { businessId },
+const listChallans = async (businessId, options = {}) => {
+  const query = typeof options === 'string' ? { search: options } : (options || {});
+  const { search } = query;
+  const where = { businessId };
+  if (search) {
+    where.OR = [
+      { challanNo: { contains: search } },
+      { partyName: { contains: search } },
+    ];
+  }
+  const paginationParams = getPaginationParams(query, { limit: 50 });
+  const total = await prisma.deliveryChallan.count({ where });
+  const orderBy = [{ date: 'desc' }, { createdAt: 'desc' }];
+
+  if (paginationParams.isAll) {
+    const data = await prisma.deliveryChallan.findMany({
+      where,
+      include: { rows: true, party: true },
+      orderBy,
+    });
+    return formatPaginatedResponse(data, total, paginationParams);
+  }
+
+  const data = await prisma.deliveryChallan.findMany({
+    where,
     include: { rows: true, party: true },
-    orderBy: [
-      { date: 'desc' },
-      { createdAt: 'desc' }
-    ],
+    orderBy,
+    skip: paginationParams.skip,
+    take: paginationParams.take,
   });
+
+  return formatPaginatedResponse(data, total, paginationParams);
 };
 
 const updateChallanStatus = async (businessId, id, status) => {
@@ -1113,7 +1252,7 @@ const convertChallanToInvoice = async (businessId, challanId) => {
 
   if (!challan) throw new ApiError(httpStatus.BAD_REQUEST, 'Challan not found or already billed');
 
-  return await prisma.$transaction(async (tx) => {
+  const invoice = await prisma.$transaction(async (tx) => {
     // Generate invoice
     const invoiceNo = await generateDocNo(tx, businessId, 'sales');
 
@@ -1159,6 +1298,9 @@ const convertChallanToInvoice = async (businessId, challanId) => {
 
     return invoice;
   });
+
+  cache.invalidateSales(businessId);
+  return invoice;
 };
 
 // =========================================================================
@@ -1272,15 +1414,38 @@ const createOrder = async (businessId, data) => {
   });
 };
 
-const listOrders = async (businessId) => {
-  return await prisma.salesOrder.findMany({
-    where: { businessId },
+const listOrders = async (businessId, options = {}) => {
+  const query = typeof options === 'string' ? { search: options } : (options || {});
+  const { search } = query;
+  const where = { businessId };
+  if (search) {
+    where.OR = [
+      { orderNo: { contains: search } },
+      { partyName: { contains: search } },
+    ];
+  }
+  const paginationParams = getPaginationParams(query, { limit: 50 });
+  const total = await prisma.salesOrder.count({ where });
+  const orderBy = [{ date: 'desc' }, { createdAt: 'desc' }];
+
+  if (paginationParams.isAll) {
+    const data = await prisma.salesOrder.findMany({
+      where,
+      include: { rows: true, party: true },
+      orderBy,
+    });
+    return formatPaginatedResponse(data, total, paginationParams);
+  }
+
+  const data = await prisma.salesOrder.findMany({
+    where,
     include: { rows: true, party: true },
-    orderBy: [
-      { date: 'desc' },
-      { createdAt: 'desc' }
-    ],
+    orderBy,
+    skip: paginationParams.skip,
+    take: paginationParams.take,
   });
+
+  return formatPaginatedResponse(data, total, paginationParams);
 };
 
 const updateOrderStatus = async (businessId, id, status) => {
@@ -1301,7 +1466,7 @@ const convertOrderToInvoice = async (businessId, orderId) => {
 
   if (!order) throw new ApiError(httpStatus.BAD_REQUEST, 'Order not found or not in pending status');
 
-  return await prisma.$transaction(async (tx) => {
+  const invoice = await prisma.$transaction(async (tx) => {
     // Generate invoice
     const invoiceNo = await generateDocNo(tx, businessId, 'sales');
 
@@ -1384,6 +1549,9 @@ const convertOrderToInvoice = async (businessId, orderId) => {
 
     return invoice;
   });
+
+  cache.invalidateSales(businessId);
+  return invoice;
 };
 
 const updateInvoice = async (businessId, id, data, userId) => {
@@ -1395,7 +1563,7 @@ const updateInvoice = async (businessId, id, data, userId) => {
 
   const { rows: newRowsData, paid, bankAccountId, previousBalancePaid, ...invoiceUpdateFields } = data;
 
-  return await prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     // 1. Revert old stock changes
     const oldItemIds = [...new Set(oldInvoice.rows.map((r) => r.itemId).filter(Boolean))];
     const oldItems = oldItemIds.length > 0 ? await tx.item.findMany({ where: { id: { in: oldItemIds } } }) : [];
@@ -1635,6 +1803,9 @@ const updateInvoice = async (businessId, id, data, userId) => {
 
     return updatedInvoice;
   });
+
+  cache.invalidateSales(businessId);
+  return updated;
 };
 
 const updateEstimate = async (businessId, id, data, userId) => {

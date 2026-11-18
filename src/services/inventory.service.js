@@ -1,6 +1,7 @@
 import prisma from '../config/prisma.js';
 import ApiError from '../utils/ApiError.js';
 import httpStatus from '../config/constants.js';
+import { getPaginationParams, formatPaginatedResponse } from '../utils/pagination.js';
 
 // =========================================================================
 // CATEGORY SERVICES
@@ -128,7 +129,10 @@ const deleteUnit = async (businessId, id) => {
 // ITEM SERVICES
 // =========================================================================
 
-const listItems = async (businessId, search, type) => {
+const listItems = async (businessId, options = {}, legacyType) => {
+  const query = typeof options === 'string' ? { search: options, type: legacyType } : (options || {});
+  const { search, type, categoryId, sortBy = 'name', sortOrder = 'asc' } = query;
+
   const where = {
     businessId,
     isArchived: false,
@@ -138,6 +142,10 @@ const listItems = async (businessId, search, type) => {
     where.type = type;
   }
 
+  if (categoryId) {
+    where.categoryId = parseInt(categoryId, 10);
+  }
+
   if (search) {
     where.OR = [
       { name: { contains: search } },
@@ -145,11 +153,32 @@ const listItems = async (businessId, search, type) => {
     ];
   }
 
-  return await prisma.item.findMany({
+  const paginationParams = getPaginationParams(query, { limit: 50 });
+  const total = await prisma.item.count({ where });
+
+  const orderBy = {
+    [sortBy === 'stockQuantity' ? 'stockQuantity' : sortBy === 'salePrice' ? 'salePrice' : 'name']:
+      sortOrder === 'desc' ? 'desc' : 'asc',
+  };
+
+  if (paginationParams.isAll) {
+    const data = await prisma.item.findMany({
+      where,
+      include: { category: true, unit: true },
+      orderBy,
+    });
+    return formatPaginatedResponse(data, total, paginationParams);
+  }
+
+  const data = await prisma.item.findMany({
     where,
     include: { category: true, unit: true },
-    orderBy: { name: 'asc' },
+    orderBy,
+    skip: paginationParams.skip,
+    take: paginationParams.take,
   });
+
+  return formatPaginatedResponse(data, total, paginationParams);
 };
 
 const createItem = async (businessId, data) => {

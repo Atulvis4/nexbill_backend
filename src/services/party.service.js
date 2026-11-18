@@ -1,6 +1,7 @@
 import prisma from '../config/prisma.js';
 import ApiError from '../utils/ApiError.js';
 import httpStatus from '../config/constants.js';
+import { getPaginationParams, formatPaginatedResponse } from '../utils/pagination.js';
 
 // Helper to compute dynamic outstanding balance for a single party
 const calculatePartyBalance = async (party) => {
@@ -217,7 +218,15 @@ const listParties = async (businessId, options = {}) => {
     mappedParties.sort((a, b) => a.outstanding - b.outstanding);
   }
 
-  return mappedParties;
+  const paginationParams = getPaginationParams(typeof options === 'object' ? options : {}, { limit: 50 });
+  const total = mappedParties.length;
+
+  if (paginationParams.isAll) {
+    return formatPaginatedResponse(mappedParties, total, paginationParams);
+  }
+
+  const pagedData = mappedParties.slice(paginationParams.skip, paginationParams.skip + paginationParams.limit);
+  return formatPaginatedResponse(pagedData, total, paginationParams);
 };
 
 const createParty = async (businessId, data) => {

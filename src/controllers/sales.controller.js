@@ -14,8 +14,7 @@ const createInvoice = asyncHandler(async (req, res) => {
 });
 
 const listInvoices = asyncHandler(async (req, res) => {
-  const { search, fromDate, toDate, partyId } = req.query;
-  const invoices = await salesService.listInvoices(req.businessId, search, fromDate, toDate, partyId);
+  const invoices = await salesService.listInvoices(req.businessId, req.query);
   sendSuccess(res, httpStatus.OK, 'Sales invoices fetched successfully', invoices);
 });
 
@@ -60,7 +59,7 @@ const createEstimate = asyncHandler(async (req, res) => {
 });
 
 const listEstimates = asyncHandler(async (req, res) => {
-  const estimates = await salesService.listEstimates(req.businessId);
+  const estimates = await salesService.listEstimates(req.businessId, req.query);
   sendSuccess(res, httpStatus.OK, 'Estimates fetched successfully', estimates);
 });
 
@@ -86,7 +85,7 @@ const createPaymentIn = asyncHandler(async (req, res) => {
 });
 
 const listPaymentsIn = asyncHandler(async (req, res) => {
-  const payments = await salesService.listPaymentsIn(req.businessId);
+  const payments = await salesService.listPaymentsIn(req.businessId, req.query);
   sendSuccess(res, httpStatus.OK, 'Payment receipts fetched successfully', payments);
 });
 
@@ -100,7 +99,7 @@ const createReturn = asyncHandler(async (req, res) => {
 });
 
 const listReturns = asyncHandler(async (req, res) => {
-  const returns = await salesService.listReturns(req.businessId);
+  const returns = await salesService.listReturns(req.businessId, req.query);
   sendSuccess(res, httpStatus.OK, 'Sales returns credit notes fetched successfully', returns);
 });
 
@@ -114,7 +113,7 @@ const createChallan = asyncHandler(async (req, res) => {
 });
 
 const listChallans = asyncHandler(async (req, res) => {
-  const challans = await salesService.listChallans(req.businessId);
+  const challans = await salesService.listChallans(req.businessId, req.query);
   sendSuccess(res, httpStatus.OK, 'Delivery challans fetched successfully', challans);
 });
 
@@ -141,7 +140,7 @@ const createOrder = asyncHandler(async (req, res) => {
 });
 
 const listOrders = asyncHandler(async (req, res) => {
-  const orders = await salesService.listOrders(req.businessId);
+  const orders = await salesService.listOrders(req.businessId, req.query);
   sendSuccess(res, httpStatus.OK, 'Sales orders fetched successfully', orders);
 });
 

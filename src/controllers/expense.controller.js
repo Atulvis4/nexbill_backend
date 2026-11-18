@@ -4,7 +4,7 @@ import sendSuccess from '../utils/response.js';
 import httpStatus from '../config/constants.js';
 
 const listExpenses = asyncHandler(async (req, res) => {
-  const expenses = await expenseService.listExpenses(req.businessId);
+  const expenses = await expenseService.listExpenses(req.businessId, req.query);
   sendSuccess(res, httpStatus.OK, 'Expenses list fetched successfully', expenses);
 });
 

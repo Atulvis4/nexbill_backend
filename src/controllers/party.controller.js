@@ -4,11 +4,8 @@ import sendSuccess from '../utils/response.js';
 import httpStatus from '../config/constants.js';
 
 const listParties = asyncHandler(async (req, res) => {
-  const { search, balanceType, sortByAmount, sortBy, sortOrder, minAmount, maxAmount, state } = req.query;
-  const parties = await partyService.listParties(req.businessId, {
-    search, balanceType, sortByAmount, sortBy, sortOrder, minAmount, maxAmount, state,
-  });
-  sendSuccess(res, httpStatus.OK, 'Parties listed successfully', parties);
+  const result = await partyService.listParties(req.businessId, req.query);
+  sendSuccess(res, httpStatus.OK, 'Parties listed successfully', result);
 });
 
 const createParty = asyncHandler(async (req, res) => {
